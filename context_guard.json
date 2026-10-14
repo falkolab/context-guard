@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "window": null,
+  "windows": {},
+  "default_window": 200000,
+  "warn_at": 0.80,
+  "checkpoint_at": 0.90,
+  "final_at": 0.95,
+  "checkpoint_dir": "~/.claude/checkpoints"
+}
