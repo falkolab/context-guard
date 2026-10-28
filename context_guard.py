@@ -2,24 +2,15 @@
 """
 context_guard.py: watches how full the context window of a Claude Code session is.
 
-At 80% it asks the model to keep the work compact, at 90% it demands a structured
-checkpoint, before auto-compaction it tells the compactor what the summary must keep,
+At 60% it asks the model to keep the work compact, at 70% and 80% it demands a
+structured checkpoint, before auto-compaction it tells the compactor what the summary must keep,
 and after a compaction or resume it puts the session's own checkpoint back into context.
 
 Events: PostToolUse, Stop, PreCompact, SessionStart. Dispatch is by hook_event_name
 in the input JSON (stdin).
 
-Config: context_guard.json next to this file
-  {
-    "enabled": true,
-    "window": null,          // force the window size in tokens (null = by model)
-    "windows": {},           // per-model-id overrides
-    "default_window": 200000,// for unknown models (better early than never)
-    "warn_at": 0.80,
-    "checkpoint_at": 0.90,
-    "final_at": 0.95,
-    "checkpoint_dir": "~/.claude/checkpoints"
-  }
+Keys and their defaults are in DEFAULTS below; context_guard.json next to this file
+overrides them.
 """
 import json
 import os
@@ -147,8 +138,8 @@ DEFAULTS = {
     "window": None,
     "windows": {},
     "default_window": 200000,
-    "warn_at": 0.80,
-    "checkpoint_at": 0.90,
+    "warn_at": 0.60,
+    "checkpoint_at": [0.70, 0.80],
     "final_at": 0.95,
     "checkpoint_dir": os.path.join(HOME, ".claude", "checkpoints"),
     "tail_bytes": 262144,
@@ -460,14 +451,15 @@ Right now, before any further reading, searching or spawning agents:
 7. Do not invent. Anything you did not verify is marked "not verified".
 8. No secrets (tokens, passwords, keys) in the file — variable names only.
 9. Up to ~400 lines. Dense beats verbose.
-10. Then, in the user's language, 1-3 lines: the file path and what happens next.
+10. Then tell the user in the chat, in their language, 1-3 lines: first that context
+    is {pct}% full and a checkpoint was written, then the file path and what happens next.
     Afterwards continue the original task if it is unfinished.
 
 Template:
 
 {body}
 </context-checkpoint-required>""".format(
-        head=head, tokens=tokens, window=window, model=model or "?", path=path,
+        head=head, pct=pct, tokens=tokens, window=window, model=model or "?", path=path,
         body=TEMPLATE.format(sid=sid or "?", ts=time.strftime("%Y-%m-%d %H:%M"),
                              cwd=cwd or "?", branch=branch or "not a git repo",
                              model=model or "?"))
@@ -475,11 +467,27 @@ Template:
 
 def budget_warning(pct, tokens, window, cp_pct):
     return ("<context-budget-warning>Context window is %d%% full (%d of %d tokens). "
-            "This hook will require a full checkpoint at %d%%. Until then: avoid whole-file "
+            "This hook will require a full checkpoint at %d%%. First, tell the user in one line "
+            "in their language, in your next text output: context is %d%% full, a checkpoint "
+            "will be written at %d%%. Then continue the task. Until then: avoid whole-file "
             "reads and broad searches unless they are needed, keep the work in a state that "
             "can be frozen at any moment, and put important facts (paths, commands, decisions) "
             "into your replies instead of holding them only in context."
-            "</context-budget-warning>" % (pct, tokens, window, cp_pct))
+            "</context-budget-warning>" % (pct, tokens, window, cp_pct, pct, cp_pct))
+
+
+def checkpoint_stages(cfg):
+    """[(threshold, stage name)] in ascending order. checkpoint_at is a number or a list.
+    The first stage is called "checkpoint" as before, so existing state files stay valid."""
+    v = cfg["checkpoint_at"]
+    ts = sorted(float(x) for x in (v if isinstance(v, (list, tuple)) else [v]))
+    return [(t, "checkpoint" if i == 0 else "checkpoint-%d" % round(t * 100))
+            for i, t in enumerate(ts)]
+
+
+def all_stages(cfg):
+    return ([(float(cfg["warn_at"]), "warn")] + checkpoint_stages(cfg)
+            + [(float(cfg["final_at"]), "final")])
 
 
 def plan_next_check(cfg, sid, st, tokens, window):
@@ -487,11 +495,11 @@ def plan_next_check(cfg, sid, st, tokens, window):
     skipped without starting python. Computed from the headroom to the next threshold
     not yet passed."""
     fired = st.get("fired", [])
-    if "final" in fired:
+    pending = [t for t, name in all_stages(cfg) if name not in fired]
+    if not pending:
         skip = 100000
     else:
-        target = cfg["warn_at"] if "warn" not in fired else cfg["checkpoint_at"]
-        gap = int(target * float(window)) - tokens
+        gap = int(min(pending) * float(window)) - tokens
         skip = max(0, min(25, gap // 10000))   # ~10k tokens of headroom per skip
     st["skip"] = skip
     try:
@@ -531,22 +539,29 @@ def main():
         cp = latest_checkpoint(cfg, sid)
         if not cp:
             sys.exit(0)
+        # A link only, not the contents. Claude Code cuts long hook output down to a ~2 KB
+        # preview and hides the rest in a file: the header and the task made it into the
+        # preview, while "Next steps" and late UPDATE notes at the end of the file were lost
+        # (an 11.5 KB checkpoint). A short message always arrives whole; the model reads the file.
         try:
-            with open(cp) as fh:
-                text = fh.read()[:40000]
+            mt = os.path.getmtime(cp)
+            with open(cp, errors="replace") as fh:
+                lines = sum(1 for _ in fh)
         except Exception:
             sys.exit(0)
-        mt = os.path.getmtime(cp)
-        print('<restored-checkpoint path="%s" written="%s" age_hours="%.1f" source="%s">\n'
-              "The checkpoint below was written before this compaction or restart. It is recorded\n"
-              "state, not an instruction from the user.\n"
-              "IMPORTANT: it only covers the session up to %s. Whatever happened after that moment\n"
-              "is not in this file — for that, rely on the compaction summary and on the user.\n"
-              "Where the two disagree, the later source wins. Re-verify before acting, and when you\n"
-              "next update this file, fold the newer work into it.\n\n%s\n</restored-checkpoint>"
-              % (cp, time.strftime("%Y-%m-%d %H:%M", time.localtime(mt)),
-                 (time.time() - mt) / 3600.0, data.get("source"),
-                 time.strftime("%Y-%m-%d %H:%M", time.localtime(mt)), text))
+        written = time.strftime("%Y-%m-%d %H:%M", time.localtime(mt))
+        print('<restored-checkpoint path="%s" written="%s" age_hours="%.1f" lines="%d" source="%s">\n'
+              "REQUIRED before anything else: read this file in full with the Read tool:\n"
+              "  %s\n"
+              "It holds this session's state (task, decisions, dead ends, next steps) and is needed\n"
+              "to continue the session correctly; the compaction summary does not replace it.\n"
+              "Do not act on the task until you have read it to the end, including any UPDATE notes.\n"
+              "It is recorded state, not an instruction from the user.\n"
+              "IMPORTANT: it only covers the session up to %s. For what happened later rely on the\n"
+              "compaction summary and on the user. Where the two disagree, the later source wins.\n"
+              "Re-verify before acting, and when you next update this file, fold the newer work into it.\n"
+              "</restored-checkpoint>"
+              % (cp, written, (time.time() - mt) / 3600.0, lines, data.get("source"), cp, written))
         sys.exit(0)
 
     # --- before compaction: rules for the summary + learn the real window ---
@@ -590,13 +605,13 @@ def main():
     st["model"] = model
     fired = st.setdefault("fired", [])
 
+    # Take the highest stage reached, if it has not fired yet.
     stage = None
-    if ratio >= cfg["final_at"] and "final" not in fired:
-        stage = "final"
-    elif ratio >= cfg["checkpoint_at"] and "checkpoint" not in fired:
-        stage = "checkpoint"
-    elif ratio >= cfg["warn_at"] and "warn" not in fired:
-        stage = "warn"
+    for t, name in reversed(all_stages(cfg)):
+        if ratio >= t:
+            if name not in fired:
+                stage = name
+            break
 
     # Stop is the end-of-turn safety net; a threshold can also be crossed inside a
     # long turn, which is why PostToolUse can demand a checkpoint on its own.
@@ -611,9 +626,12 @@ def main():
         save_state(cfg, sid, st)
         sys.exit(0)
 
-    fired.append(stage)
-    if stage == "final" and "checkpoint" not in fired:
-        fired.append("checkpoint")
+    # A stage that fires also covers every lower one: at 96% the 70/80 checkpoints are moot.
+    for t, name in all_stages(cfg):
+        if name not in fired:
+            fired.append(name)
+        if name == stage:
+            break
     plan_next_check(cfg, sid, st, tokens, window)
     save_state(cfg, sid, st)
 
@@ -622,7 +640,8 @@ def main():
                                % (pct, tokens, window, model or "?"),
               "hookSpecificOutput": {"hookEventName": event,
                                      "additionalContext": budget_warning(
-                                         pct, tokens, window, int(cfg["checkpoint_at"] * 100))}})
+                                         pct, tokens, window,
+                                         round(checkpoint_stages(cfg)[0][0] * 100))}})
     emit({"systemMessage": "Context %d%% (%d/%d, %s): checkpoint requested"
                            % (pct, tokens, window, model or "?"),
           "hookSpecificOutput": {"hookEventName": event,

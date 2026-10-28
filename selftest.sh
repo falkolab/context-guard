@@ -23,8 +23,9 @@ mk() { /usr/bin/python3 -c "
 import json,sys
 print(json.dumps({'type':'assistant','isSidechain':False,'gitBranch':'main','message':{'model':sys.argv[1],'usage':{'input_tokens':4,'cache_creation_input_tokens':0,'cache_read_input_tokens':int(sys.argv[2]),'output_tokens':0}}}))" "$1" "$2" > "$W/$3"; }
 mk claude-opus-5 120000  s_low.jsonl
-mk claude-opus-5 820000  s_warn.jsonl
-mk claude-opus-5 910000  s_cp.jsonl
+mk claude-opus-5 620000  s_warn.jsonl
+mk claude-opus-5 710000  s_cp.jsonl
+mk claude-opus-5 810000  s_cp2.jsonl
 mk claude-opus-5 960000  s_final.jsonl
 mk claude-haiku-4-5-20251001 175000 s_haiku.jsonl
 mk claude-opus-5 910000  s_side.jsonl
@@ -34,20 +35,28 @@ r={'type':'assistant','isSidechain':True,'message':{'model':'claude-opus-5','usa
 open('$W/s_side.jsonl','a').write(json.dumps(r)+'\n')"
 j() { printf '{"hook_event_name":"%s","session_id":"ST-%s","cwd":"/tmp","transcript_path":"%s/%s"%s}' "$1" "$2" "$W" "$3" "$4"; }
 chk "12%: silence"                EMPTY      "$(j Stop a s_low.jsonl | $PY)"
-chk "82%: warning"                "82%"      "$(j PostToolUse b s_warn.jsonl | $PY)"
-chk "82% on Stop: silence"        EMPTY      "$(j Stop c s_warn.jsonl | $PY)"
-chk "91%: checkpoint"             "checkpoint requested" "$(j Stop d s_cp.jsonl | $PY)"
-chk "91% again: silence"          EMPTY      "$(j Stop d s_cp.jsonl | $PY)"
+chk "62%: warning"                "62%"      "$(j PostToolUse b s_warn.jsonl | $PY)"
+chk "62% on Stop: silence"        EMPTY      "$(j Stop c s_warn.jsonl | $PY)"
+chk "71%: checkpoint"             "checkpoint requested" "$(j Stop d s_cp.jsonl | $PY)"
+chk "71% again: silence"          EMPTY      "$(j Stop d s_cp.jsonl | $PY)"
+chk "81%: second checkpoint"     "81%"      "$(j PostToolUse d s_cp2.jsonl | $PY)"
+chk "81% again: silence"          EMPTY      "$(j PostToolUse d s_cp2.jsonl | $PY)"
 chk "96%: CRITICAL"               "CRITICAL" "$(j PostToolUse e s_final.jsonl | $PY)"
 chk "haiku 200k: 87%"             "200000"   "$(j PostToolUse f s_haiku.jsonl | $PY)"
 chk "subagent not counted"        "910004"   "$(j Stop g s_side.jsonl | $PY)"
 chk "stop_hook_active loop guard" EMPTY      "$(j Stop h s_cp.jsonl ',"stop_hook_active":true' | $PY)"
+chk "warning goes to chat"       "tell the user in one line" "$(j PostToolUse w s_warn.jsonl | $PY)"
 chk "English in the instruction"  "Write the file in English" "$(j Stop i s_cp.jsonl | $PY)"
 chk "wrapper: no \\n on input"     "checkpoint requested" "$(j PostToolUse j s_cp.jsonl | $SH)"
 printf '# CHECKPOINT: old\n' > "$D/$(date +%Y-%m-%d)-ST-k.md"
 chk "existing file is rewritten"  "already exists" "$(j Stop k s_cp.jsonl | $PY)"
 chk "PreCompact: tail after cutoff" "happened AFTER" "$(j PreCompact k s_cp.jsonl | $PY)"
 chk "SessionStart: cutoff"        "only covers the session up to" "$(printf '{\"hook_event_name\":\"SessionStart\",\"source\":\"compact\",\"session_id\":\"ST-k\"}' | $PY)"
+chk "SessionStart: asks to read it" "read this file in full" "$(printf '{\"hook_event_name\":\"SessionStart\",\"source\":\"compact\",\"session_id\":\"ST-k\"}' | $PY)"
+# A link only: checkpoint text in the output is exactly what Claude Code cut down to a preview.
+out_k=$(printf '{"hook_event_name":"SessionStart","source":"compact","session_id":"ST-k"}' | $PY)
+case "$out_k" in *"# CHECKPOINT: old"*) r="present" ;; *) r="absent" ;; esac
+chk "SessionStart: no contents"   "absent"   "$r"
 chk "SessionStart startup: silence" EMPTY    "$(printf '{\"hook_event_name\":\"SessionStart\",\"source\":\"startup\",\"session_id\":\"ST-k\"}' | $PY)"
 
 # --- only the session's own checkpoint comes back: ST-k and other files exist, ST-none has none ---
