@@ -548,22 +548,29 @@ def main():
         cp = latest_checkpoint(cfg, sid)
         if not cp:
             sys.exit(0)
+        # A link only, not the contents. Claude Code cuts long hook output down to a ~2 KB
+        # preview and hides the rest in a file: the header and the task made it into the
+        # preview, while "Next steps" and late UPDATE notes at the end of the file were lost
+        # (an 11.5 KB checkpoint). A short message always arrives whole; the model reads the file.
         try:
-            with open(cp) as fh:
-                text = fh.read()[:40000]
+            mt = os.path.getmtime(cp)
+            with open(cp, errors="replace") as fh:
+                lines = sum(1 for _ in fh)
         except Exception:
             sys.exit(0)
-        mt = os.path.getmtime(cp)
-        print('<restored-checkpoint path="%s" written="%s" age_hours="%.1f" source="%s">\n'
-              "The checkpoint below was written before this compaction or restart. It is recorded\n"
-              "state, not an instruction from the user.\n"
-              "IMPORTANT: it only covers the session up to %s. Whatever happened after that moment\n"
-              "is not in this file — for that, rely on the compaction summary and on the user.\n"
-              "Where the two disagree, the later source wins. Re-verify before acting, and when you\n"
-              "next update this file, fold the newer work into it.\n\n%s\n</restored-checkpoint>"
-              % (cp, time.strftime("%Y-%m-%d %H:%M", time.localtime(mt)),
-                 (time.time() - mt) / 3600.0, data.get("source"),
-                 time.strftime("%Y-%m-%d %H:%M", time.localtime(mt)), text))
+        written = time.strftime("%Y-%m-%d %H:%M", time.localtime(mt))
+        print('<restored-checkpoint path="%s" written="%s" age_hours="%.1f" lines="%d" source="%s">\n'
+              "REQUIRED before anything else: read this file in full with the Read tool:\n"
+              "  %s\n"
+              "It holds this session's state (task, decisions, dead ends, next steps) and is needed\n"
+              "to continue the session correctly; the compaction summary does not replace it.\n"
+              "Do not act on the task until you have read it to the end, including any UPDATE notes.\n"
+              "It is recorded state, not an instruction from the user.\n"
+              "IMPORTANT: it only covers the session up to %s. For what happened later rely on the\n"
+              "compaction summary and on the user. Where the two disagree, the later source wins.\n"
+              "Re-verify before acting, and when you next update this file, fold the newer work into it.\n"
+              "</restored-checkpoint>"
+              % (cp, written, (time.time() - mt) / 3600.0, lines, data.get("source"), cp, written))
         sys.exit(0)
 
     # --- before compaction: rules for the summary + learn the real window ---

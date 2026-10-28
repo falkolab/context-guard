@@ -52,6 +52,11 @@ printf '# CHECKPOINT: old\n' > "$D/$(date +%Y-%m-%d)-ST-k.md"
 chk "existing file is rewritten"  "already exists" "$(j Stop k s_cp.jsonl | $PY)"
 chk "PreCompact: tail after cutoff" "happened AFTER" "$(j PreCompact k s_cp.jsonl | $PY)"
 chk "SessionStart: cutoff"        "only covers the session up to" "$(printf '{\"hook_event_name\":\"SessionStart\",\"source\":\"compact\",\"session_id\":\"ST-k\"}' | $PY)"
+chk "SessionStart: asks to read it" "read this file in full" "$(printf '{\"hook_event_name\":\"SessionStart\",\"source\":\"compact\",\"session_id\":\"ST-k\"}' | $PY)"
+# A link only: checkpoint text in the output is exactly what Claude Code cut down to a preview.
+out_k=$(printf '{"hook_event_name":"SessionStart","source":"compact","session_id":"ST-k"}' | $PY)
+case "$out_k" in *"# CHECKPOINT: old"*) r="present" ;; *) r="absent" ;; esac
+chk "SessionStart: no contents"   "absent"   "$r"
 chk "SessionStart startup: silence" EMPTY    "$(printf '{\"hook_event_name\":\"SessionStart\",\"source\":\"startup\",\"session_id\":\"ST-k\"}' | $PY)"
 
 # --- only the session's own checkpoint comes back: ST-k and other files exist, ST-none has none ---

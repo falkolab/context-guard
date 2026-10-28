@@ -14,7 +14,7 @@ Plain Python 3 and `/bin/sh`, no dependencies.
 | 70%, 80% | PostToolUse / Stop | Demands a checkpoint written to a strict template at `~/.claude/checkpoints/<date>-<first 8 chars of session id>.md`, then a chat line saying so; the second one rewrites the file in full |
 | 95% | PostToolUse / Stop | Demands the checkpoint be rewritten in full, folding in everything since the previous one |
 | before compaction | PreCompact | Tells the compactor what the summary must keep, and to spell out in detail what happened AFTER the checkpoint |
-| after compaction, resume, fork | SessionStart | Puts this session's checkpoint back into context, marked with the time it covers up to; if the session has none, says nothing |
+| after compaction, resume, fork | SessionStart | Tells the model to read this session's checkpoint file before anything else (a path, not the contents: Claude Code cuts long hook output to a ~2 KB preview), marked with the time it covers up to; if the session has none, says nothing |
 
 Each threshold fires once per session. Stop is the end-of-turn safety net: a threshold
 can be crossed inside one long turn, so PostToolUse can demand the checkpoint on its own
