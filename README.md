@@ -10,8 +10,8 @@ Plain Python 3 and `/bin/sh`, no dependencies.
 
 | Threshold | Event | What it does |
 |---|---|---|
-| 80% | PostToolUse | Asks the model to keep the work freezable: no whole-file reads without need, important facts go into replies |
-| 90% | PostToolUse / Stop | Demands a checkpoint written to a strict template at `~/.claude/checkpoints/<date>-<first 8 chars of session id>.md` |
+| 60% | PostToolUse | Asks the model to tell the user in one chat line how full the context is, and to keep the work freezable: no whole-file reads without need, important facts go into replies |
+| 70%, 80% | PostToolUse / Stop | Demands a checkpoint written to a strict template at `~/.claude/checkpoints/<date>-<first 8 chars of session id>.md`, then a chat line saying so; the second one rewrites the file in full |
 | 95% | PostToolUse / Stop | Demands the checkpoint be rewritten in full, folding in everything since the previous one |
 | before compaction | PreCompact | Tells the compactor what the summary must keep, and to spell out in detail what happened AFTER the checkpoint |
 | after compaction, resume, fork | SessionStart | Puts this session's checkpoint back into context, marked with the time it covers up to; if the session has none, says nothing |
@@ -125,14 +125,14 @@ summary will be the only record.
   "window": null,
   "windows": {},
   "default_window": 200000,
-  "warn_at": 0.80,
-  "checkpoint_at": 0.90,
+  "warn_at": 0.60,
+  "checkpoint_at": [0.70, 0.80],
   "final_at": 0.95,
   "checkpoint_dir": "~/.claude/checkpoints"
 }
 ```
 
-`"enabled": false` turns the hook off; edits take effect at once, without restarting
+`checkpoint_at` takes one threshold or a list. `"enabled": false` turns the hook off; edits take effect at once, without restarting
 sessions. To remove it entirely, delete its entries from `hooks` in `~/.claude/settings.json`.
 
 ## Testing
