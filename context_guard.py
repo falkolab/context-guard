@@ -9,17 +9,8 @@ and after a compaction or resume it puts the session's own checkpoint back into 
 Events: PostToolUse, Stop, PreCompact, SessionStart. Dispatch is by hook_event_name
 in the input JSON (stdin).
 
-Config: context_guard.json next to this file
-  {
-    "enabled": true,
-    "window": null,          // force the window size in tokens (null = by model)
-    "windows": {},           // per-model-id overrides
-    "default_window": 200000,// for unknown models (better early than never)
-    "warn_at": 0.60,
-    "checkpoint_at": [0.70, 0.80], // a number or a list of thresholds
-    "final_at": 0.95,
-    "checkpoint_dir": "~/.claude/checkpoints"
-  }
+Keys and their defaults are in DEFAULTS below; context_guard.json next to this file
+overrides them.
 """
 import json
 import os
