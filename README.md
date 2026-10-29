@@ -90,11 +90,13 @@ is resolved through a chain, most trusted first:
 2. the `autoCompactWindow` setting (project local, then project, then user);
 3. `"window"` in `context_guard.json`;
 4. the `[1m]` suffix in the model name;
-5. the window measured on a real auto-compaction of this model (`tokens / 0.97`): a fact beats the table;
-6. the `context:{window:...}` table extracted from the installed Claude Code binary and
+5. the `context:{window:...}` table extracted from the installed Claude Code binary and
    cached by its signature (`path:mtime:size`). It rebuilds itself when Claude Code is
    updated; the scan takes ~0.1 s and runs only on rare events, never on PostToolUse;
-7. a built-in snapshot of the table, and aliases for short names;
+6. a built-in snapshot of the table;
+7. the window measured on a real auto-compaction (`tokens / 0.97`, the largest is kept),
+   only for models the tables do not know: Claude Code also compacts early
+   (`"precomputed"`), and such a measurement understates the window; then aliases for short names;
 8. a conservative 200 000.
 
 On top: `CLAUDE_CODE_DISABLE_1M_CONTEXT` cuts the window to 200k; if actual usage is

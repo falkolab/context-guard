@@ -194,7 +194,9 @@ def learned_windows(cfg):
 
 def save_learned_window(cfg, model, window):
     data = learned_windows(cfg)
-    data[model or "unknown"] = window
+    key = model or "unknown"
+    # An early compaction gives a low estimate: keep the largest.
+    data[key] = max(window, int(data.get(key) or 0))
     try:
         with open(os.path.join(cfg["checkpoint_dir"], ".state", "windows.json"), "w") as fh:
             json.dump(data, fh)
@@ -288,8 +290,8 @@ def resolve_window(cfg, model, allow_scan=False, observed=0, cwd=None):
     1) explicit session knobs: env CLAUDE_CODE_MAX_CONTEXT_TOKENS /
        CLAUDE_CODE_AUTO_COMPACT_WINDOW, the autoCompactWindow setting, the hook config;
     2) the [1m] suffix in the model name;
-    3) measured on a real auto-compaction (learned): a fact beats the table;
-    4) the table from the installed binary, then the built-in snapshot and aliases;
+    3) the table from the installed binary, then the built-in snapshot;
+    4) measured on a real auto-compaction (learned), then aliases;
     5) a conservative default.
     On top: CLAUDE_CODE_DISABLE_1M_CONTEXT cuts the window to 200k, and actual usage
     above the computed window raises it (otherwise compaction would already have
@@ -320,10 +322,6 @@ def resolve_window(cfg, model, allow_scan=False, observed=0, cwd=None):
         if base in over:
             window, src = int(over[base]), "config:windows"
         if window is None:
-            lw = learned_windows(cfg)       # measured on a real auto-compaction
-            if base in lw and 100000 <= int(lw[base]) <= 2000000:
-                window, src = int(lw[base]), "learned:auto-compact"
-        if window is None:
             for table, label in ((catalog_windows(cfg, allow_scan), "binary-catalog"),
                                  (MODEL_WINDOWS, "builtin-snapshot")):
                 if base in table:
@@ -333,6 +331,13 @@ def resolve_window(cfg, model, allow_scan=False, observed=0, cwd=None):
                 if hit:
                     window, src = int(table[hit[0]]), label + ":prefix"
                     break
+        # Learned only for models the tables do not know. Claude Code can compact early
+        # ("precomputed": seen at 233k on a 1M window), and such a "measurement" cut
+        # the Opus 5.5 window to 240k.
+        if window is None:
+            lw = learned_windows(cfg)
+            if base in lw and 100000 <= int(lw[base]) <= 2000000:
+                window, src = int(lw[base]), "learned:auto-compact"
         if window is None and base in ALIAS_WINDOWS:
             window, src = ALIAS_WINDOWS[base], "alias"
         if window is None:
