@@ -109,6 +109,10 @@ out.append('env=%d,%s' % m.resolve_window(cfg,'claude-opus-5'))
 del os.environ['CLAUDE_CODE_MAX_CONTEXT_TOKENS']
 out.append('unknown=%d,%s' % m.resolve_window(cfg,'claude-zzz-9'))
 out.append('escalated=%d,%s' % m.resolve_window(cfg,'claude-zzz-9',observed=400000))
+m.save_learned_window(cfg,'claude-opus-5',240000)
+out.append('learnedlow=%d,%s' % m.resolve_window(cfg,'claude-opus-5'))
+m.save_learned_window(cfg,'claude-zzz-9',500000); m.save_learned_window(cfg,'claude-zzz-9',300000)
+out.append('learnedmax=%d,%s' % m.resolve_window(cfg,'claude-zzz-9'))
 print(' '.join(out))")
 rm -rf "$WT"
 chk "window: binary catalog"      "catalog=1000000,binary-catalog"     "$res"
@@ -119,5 +123,7 @@ chk "window: 1M disabled"         "no1m=200000,binary-catalog+1m-disabled" "$res
 chk "window: env override"        "env=300000,env:CLAUDE_CODE_MAX"     "$res"
 chk "window: unknown model"       "unknown=200000,default"             "$res"
 chk "window: raised by usage"     "escalated=1000000,default+observed" "$res"
+chk "window: learned does not beat the table" "learnedlow=1000000,binary-catalog" "$res"
+chk "window: learned keeps the max"  "learnedmax=500000,learned"          "$res"
 rm -rf "$W" "$HERE/__pycache__"
 echo "  --- passed $ok, failed $bad ---"
